@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TableCall</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1d1b; --muted:#6b6862; --accent:#1f5f4a; --bad:#a33a2b; --line:#e2ded5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { margin:0 0 4px; font-size:28px; }
+  .sub { color:var(--muted); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+  form { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label { display:flex; flex-direction:column; font-size:13px; color:var(--muted); gap:4px; }
+  input, select, textarea { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; color:var(--ink); }
+  .full { grid-column:1 / -1; }
+  button { font:inherit; padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  ol { padding-left:20px; margin:0; }
+  li { padding:10px 0; border-bottom:1px solid var(--line); }
+  li:last-child { border-bottom:0; }
+  .meta { color:var(--muted); font-size:13px; }
+  .status { font-size:13px; font-weight:600; }
+  .status.calling { color:var(--accent); }
+  .status.failed { color:var(--bad); }
+  .status.booked { color:var(--accent); }
+  .actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+  .confirm { border-color:var(--accent); border-width:2px; }
+  .error { color:var(--bad); }
+  details { margin-top:8px; font-size:13px; }
+  pre { white-space:pre-wrap; background:#faf9f6; padding:8px; border-radius:6px; }
+  @media (max-width:560px) { form { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>TableCall</h1>
+  <p class="sub">Type what you want. An AI voice agent phones restaurants and books it for you.</p>
+
+  <section class="card">
+    <h2 style="margin-top:0;font-size:18px">Listen to the table</h2>
+    <p class="meta" style="margin-top:0">Talk it through as a group. TableCall works out what everyone wants and picks restaurants that suit the whole table.</p>
+    <div class="actions" style="margin-top:0">
+      <button id="listen" type="button">Start listening</button>
+      <button id="analyse" type="button" class="secondary" disabled>Work out what we want</button>
+    </div>
+    <label class="full" style="margin-top:12px">Transcript (edit or paste if needed)
+      <textarea id="transcript" rows="5" placeholder="e.g. &quot;I really fancy Thai.&quot; &quot;Not Indian again please.&quot; &quot;Sam's vegan, so somewhere with options. Seven-ish?&quot;"></textarea>
+    </label>
+    <p id="listen-status" class="meta"></p>
+    <div id="group-summary" hidden></div>
+    <p id="group-error" class="error"></p>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0;font-size:18px">Booking details</h2>
+    <form id="request">
+      <label>Your name <input name="customer_name" required value="Honor"></label>
+      <label>Contact number (optional) <input name="customer_phone" placeholder="07..."></label>
+      <label>Date <input name="date" type="date" required></label>
+      <label>Time <input name="time" type="time" required value="19:30"></label>
+      <label>Party size <input name="party_size" type="number" min="1" max="20" value="2" required></label>
+      <label>Time flexibility
+        <select name="flex_minutes">
+          <option value="0">Exact time only</option>
+          <option value="30">± 30 minutes</option>
+          <option value="45" selected>± 45 minutes</option>
+          <option value="60">± 60 minutes</option>
+        </select>
+      </label>
+      <label>Cuisine <input name="cuisine" placeholder="e.g. Thai, Italian" value="Thai"></label>
+      <label>Minimum rating
+        <select name="min_rating">
+          <option value="3.5">3.5+</option>
+          <option value="4.0">4.0+</option>
+          <option value="4.5" selected>4.5+</option>
+        </select>
+      </label>
+      <label class="full">Area <input name="area" value="Oxford, UK"></label>
+      <label class="full">Notes for the restaurant (optional)
+        <input name="notes" placeholder="e.g. wheelchair access needed, one vegan">
+      </label>
+      <div class="full"><button type="submit">Find restaurants</button></div>
+    </form>
+    <p id="search-error" class="error"></p>
+  </section>
+
+  <section id="results" class="card" hidden>
+    <h2 style="margin-top:0;font-size:18px">Shortlist, called in this order</h2>
+    <ol id="list"></ol>
+    <div class="actions">
+      <button id="call-next">Call first restaurant</button>
+      <button id="hang-up" class="secondary" disabled>Hang up</button>
+    </div>
+    <p class="meta">Demo mode: the call opens in your browser and you play the restaurant. Allow microphone access.</p>
+    <p id="call-error" class="error"></p>
+  </section>
+
+  <section id="confirmation" class="card confirm" hidden></section>
+</main>
+
+<script type="module">
+  // Retell browser SDK, loaded from a CDN so no build step is needed.
+  import { RetellWebClient } from "https://esm.sh/retell-client-js-sdk@3";
+
+  const $ = (id) => document.getElementById(id);
+  const form = $("request");
+  form.date.value = new Date().toISOString().slice(0, 10);
+
+  const client = new RetellWebClient();
+  let restaurants = [];
+  let current = -1;
+  let activeCallId = null;
+  let request = null;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("search-error").textContent = "";
+    request = Object.fromEntries(new FormData(form));
+    const res = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+    const data = await readJson(res);
+    if (!res.ok) { $("search-error").textContent = data.error; return; }
+    loadShortlist(data.restaurants, $("search-error"));
+  });
+
+  function loadShortlist(list, errorEl) {
+    restaurants = list.map((r) => ({ ...r, status: "Waiting" }));
+    current = -1;
+    $("confirmation").hidden = true;
+    if (!restaurants.length) {
+      $("results").hidden = true;
+      errorEl.textContent = "No restaurants match and are open then. Try a lower rating, another time or a wider area.";
+      return;
+    }
+    $("results").hidden = false;
+    $("call-next").disabled = false;
+    $("call-next").textContent = "Call first restaurant";
+    render();
+  }
+
+  // ---------- Group listening ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recogniser = null;
+  let listening = false;
+  let finalText = "";
+
+  if (!SR) {
+    $("listen").disabled = true;
+    $("listen-status").textContent = "Live listening needs Google Chrome. You can still paste a transcript.";
+  }
+
+  $("transcript").addEventListener("input", () => {
+    finalText = $("transcript").value;
+    $("analyse").disabled = !finalText.trim();
+  });
+
+  $("listen").addEventListener("click", () => (listening ? stopListening() : startListening()));
+
+  function startListening() {
+    recogniser = new SR();
+    recogniser.lang = "en-GB";
+    recogniser.continuous = true;
+    recogniser.interimResults = true;
+    finalText = $("transcript").value ? $("transcript").value.trim() + " " : "";
+    recogniser.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t.trim() + ". ";
+        else interim += t;
+      }
+      $("transcript").value = finalText + interim;
+      $("analyse").disabled = !$("transcript").value.trim();
+    };
+    // Chrome stops after a pause in speech; restart while we are still listening.
+    recogniser.onend = () => { if (listening) { try { recogniser.start(); } catch (_) {} } };
+    recogniser.onerror = (e) => {
+      if (e.error === "not-allowed") { $("listen-status").textContent = "Microphone blocked. Allow it in Chrome and try again."; stopListening(); }
+    };
+    recogniser.start();
+    listening = true;
+    $("listen").textContent = "Stop listening";
+    $("listen-status").textContent = "Listening… talk naturally about where to eat.";
+  }
+
+  function stopListening() {
+    listening = false;
+    recogniser?.stop();
+    $("listen").textContent = "Start listening";
+    $("listen-status").textContent = "";
+    $("transcript").value = finalText.trim();
+  }
+
+  $("analyse").addEventListener("click", async () => {
+    if (listening) stopListening();
+    $("group-error").textContent = "";
+    $("analyse").disabled = true;
+    $("analyse").textContent = "Thinking…";
+    const base = Object.fromEntries(new FormData(form));
+    try {
+      const res = await fetch("/api/group", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...base, transcript: $("transcript").value }),
+      });
+      const data = await readJson(res);
+      if (data.preferences) showGroup(data.preferences, data.vetoed || {});
+      if (!res.ok) { $("group-error").textContent = data.error; return; }
+      fillForm(data.form);
+      request = Object.fromEntries(new FormData(form));
+      loadShortlist(data.restaurants, $("group-error"));
+    } catch (err) {
+      $("group-error").textContent = "Something went wrong: " + err.message;
+    } finally {
+      $("analyse").disabled = false;
+      $("analyse").textContent = "Work out what we want";
+    }
+  });
+
+  function showGroup(p, vetoed) {
+    const people = p.people.map((x) => `
+      <li><strong>${esc(x.label)}</strong>:
+        ${x.likes.length ? "likes " + esc(x.likes.join(", ")) : "no strong preference"}
+        ${x.dislikes.length ? " · <span class='error'>not " + esc(x.dislikes.join(", ")) + "</span>" : ""}
+        ${x.needs.length ? " · needs " + esc(x.needs.join(", ")) : ""}</li>`).join("");
+    const v = Object.keys(vetoed);
+    $("group-summary").innerHTML = `
+      <p style="margin-bottom:4px"><strong>${esc(p.summary)}</strong></p>
+      <ul style="margin:0;padding-left:20px">${people}</ul>
+      ${v.length ? `<p class="meta">Ruled out: ${esc(v.join(", "))}</p>` : ""}`;
+    $("group-summary").hidden = false;
+  }
+
+  function fillForm(f) {
+    if (f.date) form.date.value = f.date;
+    if (f.time) form.time.value = f.time;
+    if (f.party_size) form.party_size.value = f.party_size;
+    if (f.cuisine !== undefined) form.cuisine.value = f.cuisine;
+    if (f.notes) form.notes.value = f.notes;
+    if (f.min_rating) setNearest(form.min_rating, Number(f.min_rating));
+    if (f.flex_minutes !== null && f.flex_minutes !== undefined) setNearest(form.flex_minutes, Number(f.flex_minutes));
+  }
+
+  function setNearest(select, value) {
+    let best = select.options[0];
+    for (const o of select.options) if (Math.abs(Number(o.value) - value) < Math.abs(Number(best.value) - value)) best = o;
+    select.value = best.value;
+  }
+
+  function render() {
+    $("list").innerHTML = restaurants.map((r) => `
+      <li>
+        <strong>${esc(r.name)}</strong> <span class="meta">★ ${r.rating ?? "?"} (${r.rating_count})</span><br>
+        <span class="meta">${esc(r.address)}${r.phone ? " · " + esc(r.phone) : ""}${r.hours_known ? "" : " · opening hours unknown"}</span><br>
+        ${r.reason ? `<span class="meta">Why: ${esc(r.reason)}</span><br>` : ""}
+        <span class="status ${r.cls || ""}">${esc(r.status)}</span>
+        ${r.transcript ? `<details><summary>Transcript</summary><pre>${esc(r.transcript)}</pre></details>` : ""}
+      </li>`).join("");
+  }
+
+  $("call-next").addEventListener("click", async () => {
+    current += 1;
+    if (current >= restaurants.length) return;
+    const r = restaurants[current];
+    $("call-error").textContent = "";
+    $("call-next").disabled = true;
+    r.status = "Calling…"; r.cls = "calling"; render();
+
+    const res = await fetch("/api/call", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...request, restaurant_name: r.name, restaurant_id: r.id }),
+    });
+    const call = await readJson(res);
+    if (!res.ok) { fail(r, call.error); return; }
+    activeCallId = call.call_id;
+    $("hang-up").disabled = false;
+    try {
+      await client.startCall({
+        callId: call.call_id, accessToken: call.access_token,
+        transport: call.transport, iceServers: call.ice_servers,
+      });
+    } catch (err) { fail(r, "Could not start audio: " + err.message); }
+  });
+
+  $("hang-up").addEventListener("click", () => { client.stopCall(); onCallEnded(); });
+  client.on("call_ended", onCallEnded);
+  client.on("error", (err) => { console.error(err); client.stopCall(); onCallEnded(); });
+
+  let ending = false;
+  async function onCallEnded() {
+    if (!activeCallId || ending) return;
+    ending = true;
+    $("hang-up").disabled = true;
+    const r = restaurants[current];
+    r.status = "Call ended, reading the outcome…"; render();
+    const outcome = await pollOutcome(activeCallId);
+    activeCallId = null; ending = false;
+    r.transcript = outcome.transcript;
+    const res = outcome.result || {};
+    if (res.booking_confirmed) {
+      r.status = `Booked for ${res.confirmed_time || "?"}`; r.cls = "booked"; render();
+      showConfirmation(r, res);
+      return;
+    }
+    fail(r, res.outcome_reason || outcome.summary || "No booking made");
+  }
+
+  async function pollOutcome(callId) {
+    for (let i = 0; i < 30; i++) {           // up to about 60 seconds
+      const res = await fetch(`/api/call/${callId}`);
+      const data = await readJson(res);
+      if (res.ok && data.analysed) return data;
+      await new Promise((ok) => setTimeout(ok, 2000));
+    }
+    return { result: {}, summary: "Outcome not available yet; check the Retell dashboard." };
+  }
+
+  function fail(r, reason) {
+    r.status = `No booking: ${reason}`; r.cls = "failed"; render();
+    $("hang-up").disabled = true;
+    const more = current + 1 < restaurants.length;
+    $("call-next").disabled = !more;
+    $("call-next").textContent = more ? `Call next: ${restaurants[current + 1].name}` : "No restaurants left";
+  }
+
+  function showConfirmation(r, res) {
+    $("call-next").disabled = true;
+    const box = $("confirmation");
+    box.hidden = false;
+    box.innerHTML = `
+      <h2 style="margin-top:0;font-size:18px">Booking confirmed</h2>
+      <p><strong>${esc(r.name)}</strong><br>${esc(r.address)}</p>
+      <p>${esc(request.date)} at <strong>${esc(res.confirmed_time || "?")}</strong>, table for ${esc(request.party_size)}, under ${esc(res.booking_name || request.customer_name)}</p>
+      ${res.conditions ? `<p class="meta">Conditions: ${esc(res.conditions)}</p>` : ""}`;
+  }
+
+  // Read a server reply as JSON, turning a non-JSON reply (e.g. a crash page) into a readable error.
+  async function readJson(res) {
+    const text = await res.text();
+    try { return JSON.parse(text); }
+    catch { return { error: `Server error ${res.status}. Check the terminal running app.py for details.` }; }
+  }
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+</script>
+</body>
+</html>
