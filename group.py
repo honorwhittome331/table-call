@@ -32,10 +32,11 @@ EXTRACTION_PROMPT = """You are listening to a group of friends deciding where to
 The transcript comes from speech recognition, so it has no speaker labels and may contain errors.
 Infer the separate people from context (names, "I", "me", disagreements). If unclear, make your best estimate.
 
-Today is {today}. Default area: {area}.
+Today is {today}. Area typed by the user (may be empty): {area}.
 
 Return ONLY a JSON object with exactly these keys:
 {{
+  "area": string or null (a place they want to eat, as a searchable location such as "Soho, London" or "Brooklyn, New York"; null if no place was mentioned),
   "party_size": integer or null,
   "date": "YYYY-MM-DD" or null (resolve words like "tomorrow" or "Friday" using today's date),
   "time": "HH:MM" 24-hour or null,
@@ -62,13 +63,13 @@ Transcript:
 """
 
 
-def extract_preferences(api_key, model, transcript, area="Oxford, UK", today=None):
+def extract_preferences(api_key, model, transcript, area="", today=None):
     """Ask Gemini to turn a free-form transcript into structured preferences."""
     if not transcript or not transcript.strip():
         raise ValueError("The transcript is empty.")
     prompt = EXTRACTION_PROMPT.format(
         today=(today or date.today()).strftime("%A %d %B %Y (%Y-%m-%d)"),
-        area=area,
+        area=area or "(none)",
         transcript=transcript.strip()[:8000],
     )
     body = {
@@ -179,7 +180,9 @@ def normalise(prefs):
     time_str = _matches(prefs.get("time"), r"\d{1,2}:\d{2}")
     if time_str and len(time_str) == 4:
         time_str = "0" + time_str  # 7:30 -> 07:30
+    area = prefs.get("area")
     return {
+        "area": area.strip() if isinstance(area, str) and area.strip() else None,
         "party_size": party,
         "date": _matches(prefs.get("date"), r"\d{4}-\d{2}-\d{2}"),
         "time": time_str,
@@ -244,13 +247,13 @@ def explain(restaurant, cuisine, people):
     return " · ".join(parts)
 
 
-def rank_for_group(places_key, prefs, when, area, min_rating, max_results=5):
+def rank_for_group(places_key, prefs, when, area, min_rating, max_results=5, location=None):
     """Search each acceptable cuisine, score by group fit + rating, return the best."""
     people = prefs["people"]
     cuisines = candidate_cuisines(people) or [""]
     seen = {}
     for cuisine in cuisines:
-        for r in search_restaurants(places_key, cuisine, area, min_rating, when, max_results=8):
+        for r in search_restaurants(places_key, cuisine, area, min_rating, when, max_results=8, location=location):
             if not price_ok(r, prefs.get("max_price_level")):
                 continue
             fit = group_fit(cuisine, people)

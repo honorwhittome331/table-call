@@ -79,7 +79,16 @@
           <option value="4.5" selected>4.5+</option>
         </select>
       </label>
-      <label class="full">Area <input name="area" value="Oxford, UK"></label>
+      <div class="full">
+        <label>Area (any city or neighbourhood)
+          <input name="area" placeholder="e.g. Soho, London · Brooklyn, New York · Le Marais, Paris">
+        </label>
+        <div class="actions" style="margin-top:6px">
+          <button type="button" id="near-me" class="secondary">Use my location</button>
+          <span id="loc-status" class="meta" style="align-self:center"></span>
+        </div>
+        <input type="hidden" name="lat"><input type="hidden" name="lng">
+      </div>
       <label class="full">Notes for the restaurant (optional)
         <input name="notes" placeholder="e.g. wheelchair access needed, one vegan">
       </label>
@@ -140,6 +149,47 @@
     $("call-next").textContent = "Call first restaurant";
     render();
   }
+
+  // ---------- Location ----------
+  function clearLocation() {
+    form.lat.value = ""; form.lng.value = "";
+    $("loc-status").textContent = "";
+  }
+  form.area.addEventListener("input", () => { if (form.area.value.trim()) clearLocation(); });
+  $("near-me").addEventListener("click", () => {
+    if (!navigator.geolocation) { $("loc-status").textContent = "Location not available in this browser."; return; }
+    $("loc-status").textContent = "Finding you… (allow location if Chrome or your Mac asks)";
+    // The browser's own timeout only starts after permission is granted, so a hidden
+    // permission prompt can leave this waiting forever. Give up after 20 seconds.
+    let settled = false;
+    const watchdog = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      $("loc-status").textContent = "Still waiting for location permission. Check for a prompt in the address bar or behind this window, or type an area instead.";
+    }, 20000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(watchdog);
+        settled = true;
+        form.lat.value = pos.coords.latitude.toFixed(5);
+        form.lng.value = pos.coords.longitude.toFixed(5);
+        form.area.value = "";
+        $("loc-status").textContent = "Searching near your current location.";
+      },
+      (err) => {
+        clearTimeout(watchdog);
+        settled = true;
+        const why = {
+          1: "Permission denied. Allow location for this site in Chrome (icon left of the address bar), and for Chrome in your computer's location settings.",
+          2: "Your computer couldn't work out its location. Check Wi-Fi is on and Location Services are enabled.",
+          3: "Timed out finding your location. Try again.",
+        }[err.code] || err.message;
+        $("loc-status").textContent = `Couldn't get your location: ${why} Or type an area instead.`;
+        console.warn("Geolocation error", err.code, err.message);
+      },
+      { timeout: 15000, maximumAge: 600000 },
+    );
+  });
 
   // ---------- Group listening ----------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -239,6 +289,7 @@
     if (f.party_size) form.party_size.value = f.party_size;
     if (f.cuisine !== undefined) form.cuisine.value = f.cuisine;
     if (f.notes) form.notes.value = f.notes;
+    if (f.area && f.area !== form.area.value) { form.area.value = f.area; clearLocation(); }
     if (f.min_rating) setNearest(form.min_rating, Number(f.min_rating));
     if (f.flex_minutes !== null && f.flex_minutes !== undefined) setNearest(form.flex_minutes, Number(f.flex_minutes));
   }

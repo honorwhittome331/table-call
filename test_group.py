@@ -14,6 +14,8 @@ PEOPLE = group.normalise({"people": [
 def test_normalise_lowercases_and_infers_party_size():
     prefs = group.normalise({"people": [{"likes": [" Thai "]}, {}]})
     assert prefs["party_size"] == 2
+    assert prefs["area"] is None
+    assert group.normalise({"area": " Shoreditch, London "})["area"] == "Shoreditch, London"
     assert prefs["people"][0]["likes"] == ["thai"]
     assert prefs["people"][1]["label"] == "Person 2"
 

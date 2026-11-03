@@ -2,14 +2,14 @@
 
 **Talk it through as a group, and an AI voice agent phones restaurants to book the table.**
 
-TableCall listens to a group deciding where to eat, works out what everyone wants (cuisines, vetoes, dietary and access needs, time, party size, budget), ranks Oxford restaurants by how well they suit the whole group, then uses a voice agent to phone each one in turn until a table is booked.
+TableCall listens to a group deciding where to eat, works out what everyone wants (cuisines, vetoes, dietary and access needs, time, party size, budget), ranks restaurants anywhere in the world by how well they suit the whole group, then uses a voice agent to phone each one in turn until a table is booked.
 
 Built for the Hiya Voice AI Challenge (Productivity track).
 
 ## How it works
 
 1. **Listen**: Chrome's speech recognition transcribes the group conversation live (or paste a transcript).
-2. **Understand**: Gemini turns the messy transcript into structured preferences per person.
+2. **Understand**: Gemini turns the messy transcript into structured preferences per person, including where they want to eat.
 3. **Rank**: Google Places finds restaurants that are open at the requested time; each is scored 60% on group fit (share of people who wanted that cuisine) and 40% on a review-weighted rating. Vetoed cuisines and over-budget places are excluded. Each result shows the reason for its ranking.
 4. **Call**: A Retell AI voice agent phones the restaurant, says it is an AI calling on the customer's behalf, negotiates a time within the customer's window, never gives payment details, and asks the restaurant to confirm.
 5. **Confirm**: Retell's post-call analysis extracts the outcome (booked or not, time, name, conditions). If there is no booking, move on to the next restaurant.
@@ -45,11 +45,15 @@ Open **http://localhost:5001** in Chrome and allow microphone access.
 
 (On macOS, port 5000 is taken by AirPlay Receiver, so use 5001.)
 
+## Where it works
+
+Anywhere Google Places covers. The area comes from, in order: a place mentioned in the conversation ("let's go somewhere in Shoreditch"), the **Area** box (any city or neighbourhood), or **Use my location** (searches within about 3 km). Times are local to the restaurant. The calling agent speaks English.
+
 ## Try it
 
 **Group mode**
 1. Click **Start listening** and talk as a group (use names, e.g. "I'm Amy and I fancy Thai"), or paste a transcript such as:
-   > I'm Amy, I've been craving Thai all week. Thai sounds good to me, this is Ben, but please not Indian again. Sam here, I could do Thai I suppose but I'd prefer Italian, and I'm vegan. Seven-ish tomorrow? Just the three of us, nothing too pricey.
+   > I'm Amy, let's eat in Soho tomorrow, I've been craving Thai all week. Thai sounds good to me, this is Ben, but please not Indian again. Sam here, I could do Thai I suppose but I'd prefer Italian, and I'm vegan. Seven-ish tomorrow? Just the three of us, nothing too pricey.
 2. Click **Work out what we want**. The form fills itself and a group-ranked shortlist appears.
 
 **Calling**

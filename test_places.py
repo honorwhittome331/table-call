@@ -44,6 +44,26 @@ def test_bayesian_ranking_prefers_many_reviews():
     assert score(many) > score(few)
 
 
+def test_query_works_for_any_area():
+    from places import build_query
+    assert build_query("thai", "Brooklyn, New York")["textQuery"] == "thai restaurant in Brooklyn, New York"
+    assert "locationBias" not in build_query("thai", "Paris")
+
+
+def test_query_near_me_uses_location_bias():
+    from places import build_query
+    body = build_query("", "", {"lat": 40.7, "lng": -74.0})
+    assert body["textQuery"] == "restaurant"
+    assert body["locationBias"]["circle"]["center"] == {"latitude": 40.7, "longitude": -74.0}
+
+
+def test_query_needs_area_or_location():
+    import pytest
+    from places import build_query
+    with pytest.raises(ValueError):
+        build_query("thai", "  ")
+
+
 def test_time_window():
     early, late = time_window(TUE_1930, 45)
     assert (early.hour, early.minute, late.hour, late.minute) == (18, 45, 20, 15)

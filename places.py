@@ -14,24 +14,40 @@ FIELD_MASK = ",".join([
     "places.formattedAddress",
     "places.rating",
     "places.userRatingCount",
-    "places.nationalPhoneNumber",
+    "places.internationalPhoneNumber",
     "places.regularOpeningHours",
     "places.priceLevel",
 ])
 
 MINUTES_PER_WEEK = 7 * 24 * 60
+NEARBY_RADIUS_M = 3000.0  # "Near me" search radius.
 # How long the table must stay available after arrival for us to call it "open".
 MIN_SITTING_MINUTES = 60
 
 
-def search_restaurants(api_key, cuisine, area, min_rating, when, max_results=5):
-    """Return a ranked list of restaurants open at `when` (a datetime)."""
-    body = {
-        "textQuery": f"{cuisine} restaurant in {area}".strip(),
-        "includedType": "restaurant",
-        "minRating": float(min_rating),
-        "pageSize": 20,
-    }
+def build_query(cuisine, area, location=None):
+    """Build a Places Text Search body for anywhere in the world.
+
+    `area` is free text ("Soho, London", "Manhattan, NY"). `location` is an optional
+    {"lat": .., "lng": ..} from the browser, used to bias results to nearby places.
+    """
+    area = (area or "").strip()
+    if not area and not location:
+        raise ValueError("Please enter an area (e.g. 'Soho, London') or use your location.")
+    text = f"{cuisine.strip()} restaurant".strip()
+    body = {"textQuery": f"{text} in {area}" if area else text, "includedType": "restaurant"}
+    if location and not area:
+        body["locationBias"] = {"circle": {
+            "center": {"latitude": float(location["lat"]), "longitude": float(location["lng"])},
+            "radius": NEARBY_RADIUS_M,
+        }}
+    return body
+
+
+def search_restaurants(api_key, cuisine, area, min_rating, when, max_results=5, location=None):
+    """Return a ranked list of restaurants open at `when` (local time at the restaurant)."""
+    body = build_query(cuisine, area, location)
+    body.update({"minRating": float(min_rating), "pageSize": 20})
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
@@ -53,7 +69,7 @@ def search_restaurants(api_key, cuisine, area, min_rating, when, max_results=5):
             "address": p.get("formattedAddress", ""),
             "rating": p.get("rating"),
             "rating_count": p.get("userRatingCount", 0),
-            "phone": p.get("nationalPhoneNumber"),
+            "phone": p.get("internationalPhoneNumber"),
             "price_level": p.get("priceLevel"),
             "hours_known": hours is not None,
         })

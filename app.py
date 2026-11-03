@@ -55,6 +55,15 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+def location_from(d):
+    """Browser coordinates from 'Use my location', if given and valid."""
+    try:
+        lat, lng = float(d.get("lat")), float(d.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    return {"lat": lat, "lng": lng} if -90 <= lat <= 90 and -180 <= lng <= 180 else None
+
+
 @app.post("/api/search")
 def search():
     if not PLACES_KEY:
@@ -65,9 +74,10 @@ def search():
         results = search_restaurants(
             PLACES_KEY,
             cuisine=d.get("cuisine", ""),
-            area=d.get("area") or "Oxford, UK",
+            area=d.get("area", ""),
             min_rating=d.get("min_rating", 4.0),
             when=when,
+            location=location_from(d),
         )
     except (KeyError, ValueError) as e:
         return jsonify(error=f"Bad request: {e}"), 400
@@ -84,9 +94,10 @@ def group_search():
     if not PLACES_KEY:
         return jsonify(error="GOOGLE_PLACES_API_KEY missing from .env"), 500
     d = request.get_json(force=True)
-    area = d.get("area") or "Oxford, UK"
+    form_area = (d.get("area") or "").strip()
+    location = location_from(d)
     try:
-        prefs = group.extract_preferences(GEMINI_KEY, GEMINI_MODEL, d.get("transcript", ""), area=area)
+        prefs = group.extract_preferences(GEMINI_KEY, GEMINI_MODEL, d.get("transcript", ""), area=form_area)
     except json.JSONDecodeError:
         return jsonify(error="Gemini did not return valid JSON. Try again."), 502
     except ValueError as e:
@@ -95,12 +106,20 @@ def group_search():
         return jsonify(error=str(e)), 502
 
     # The conversation wins; the form fills any gaps.
+    area = prefs["area"] or form_area
+    if prefs["area"]:
+        location = None  # A place named in the conversation beats "near me".
+    if not area and not location:
+        return jsonify(
+            error="Where should we look? Mention a place in the conversation, type an area, or use your location.",
+            preferences=prefs,
+        ), 400
     booking_date = prefs["date"] or d.get("date")
     booking_time = prefs["time"] or d.get("time") or "19:30"
     min_rating = prefs["min_rating"] or d.get("min_rating") or 4.0
     try:
         when = datetime.strptime(f"{booking_date} {booking_time}", "%Y-%m-%d %H:%M")
-        restaurants = group.rank_for_group(PLACES_KEY, prefs, when, area, min_rating)
+        restaurants = group.rank_for_group(PLACES_KEY, prefs, when, area, min_rating, location=location)
     except ValueError as e:
         return jsonify(error=f"Could not read date or time: {e}", preferences=prefs), 400
     except RuntimeError as e:
@@ -115,6 +134,7 @@ def group_search():
             "party_size": prefs["party_size"] or d.get("party_size"),
             "flex_minutes": prefs["flex_minutes"],
             "cuisine": ", ".join(group.candidate_cuisines(prefs["people"])),
+            "area": area,
             "min_rating": min_rating,
             "notes": group.needs_note(prefs["people"]),
         },
